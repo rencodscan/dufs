@@ -1,27 +1,75 @@
-name: Security Analysis Workflow
-on: [push, pull_request]
+name: New Tool Testing
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  security_checks:
+  initial_checks:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
-    - name: Semgrep Scan
-      uses: returntocorp/semgrep-action@v1
+      - name: Install OSINT tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl git jq
 
-    - name: Setup Java for Dependency Check
-      uses: actions/setup-java@v2
-      with:
-        distribution: 'adopt'
-        java-version: '11'
+      - name: Perform OSINT on the tool's repository
+        run: |
+          curl -s https://github.com/<tool-repo-owner>/<tool-repo-name> | jq '.name'
+          curl -s https://github.com/<tool-repo-owner>/<tool-repo-name> | jq '.description'
+          curl -s https://github.com/<tool-repo-owner>/<tool-repo-name> | jq '.topics[]'
+          git log --pretty=format:"%aN <%aE>"
 
-    - name: OWASP Dependency Check
-      run: |
-        wget https://github.com/jeremylong/DependencyCheck/releases/download/v6.1.6/dependency-check-6.1.6-release.zip
-        unzip dependency-check-6.1.6-release.zip
-        ./dependency-check/bin/dependency-check.sh --project "MyProject" --scan .
+      - name: Check for potential license issues
+        run: |
+          curl -s https://api.github.com/repos/<tool-repo-owner>/<tool-repo-name>/license | jq '.name'
+          curl -s https://api.github.com/repos/<tool-repo-owner>/<tool-repo-name>/license | jq '.spdx_id'
 
-    - name: Gitleaks Scan
-      uses: zricethezav/gitleaks-action@v1
+  vulnerability_scanning:
+    runs-on: ubuntu-latest
+    needs: initial_checks
+    steps:
+      - uses: actions/checkout@v3
 
+      - name: Install vulnerability scanning tool (e.g., Snyk)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y snyk
+
+      - name: Scan the tool for vulnerabilities
+        run: |
+          snyk test <tool-directory>
+
+      - name: Generate vulnerability report
+        run: |
+          snyk save --severity-threshold medium -o vulnerabilities.json
+
+      - name: Upload vulnerability report to GitHub
+        uses: actions/upload-artifact@v3
+        with:
+          path: vulnerabilities.json
+          name: vulnerabilities-report
+
+  license_review:
+    runs-on: ubuntu-latest
+    needs: initial_checks
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install license review tool (e.g., SPDX-License-Identifier-Validator)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y SPDX-License-Identifier-Validator
+
+      - name: Validate the tool's license
+        run: |
+          SPDX-License-Identifier-Validator <tool-directory>
+
+      - name: Check for any license compatibility issues
+        run: |
+          curl -s https://api.github.com/repos/<tool-repo-owner>/<tool-repo-name>/contents/LICENSE | jq '.name'
+          curl -s https://api.github.com/repos/<tool-repo-owner>/<tool-repo-name>/contents/LICENSE | jq '.sha'
